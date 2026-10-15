@@ -1,0 +1,49 @@
+Testes do firewall CerradoShop
+
+== 0. Pré-requisitos: ambiente no ar ==
+  PASS  serviço web respondendo localmente
+  PASS  firewall carregou as regras (arquivo /tmp/firewall-ready)
+  PASS  roteamento ativo no firewall (ip_forward = 1)
+  PASS  políticas INPUT, FORWARD e OUTPUT em DROP
+
+== 1. Testes POSITIVOS (o que DEVE funcionar) ==
+  PASS  P1  cliente -> web HTTP  (curl http://dmz-web) retorna 200
+  PASS  P2  cliente -> web HTTPS (curl -k https://dmz-web) retorna 200
+  PASS  P3  cliente -> web ICMP (ping dmz-web)
+  PASS  P4  cliente -> gateway ICMP (ping no firewall 10.77.1.254)
+  PASS  P5  web -> banco, porta TCP 5432 aberta (mesmo segmento db_net)
+  PASS  P6  web -> banco autenticado (loja_app lê 3 produtos)
+
+== 2. Testes NEGATIVOS (o que DEVE ser bloqueado) ==
+  PASS  N1  cliente -> banco TCP 5432 (nc dmz-db 5432)
+  PASS  N2  cliente -> banco via psql: tempo esgotado (pacote descartado pelo DROP)
+  PASS  N3  nmap -Pn -p 5432 dmz-db: porta 'filtered' (firewall descarta)
+  PASS  N4  nmap no web: somente 2 portas abertas (80 e 443)
+  PASS  N5  cliente -> web porta 8080 (não liberada)
+  PASS  N6  cliente -> SSH no firewall (porta 22 do gateway)
+  PASS  N7  cliente -> banco ICMP (ping dmz-db)
+  PASS  N8  cliente -> web pelo IP do segmento do banco (10.77.3.10:80)
+  PASS  N9  anti-spoofing: pacote com IP de origem forjado expira (curl rc=28)
+
+== 3. Evidência no firewall: contadores das regras ==
+  PASS  R1 (ACCEPT http) contou 4 pacotes
+  PASS  R4 (DROP LAN->DB 5432) contou 18 pacotes
+
+Cadeia FORWARD (evidência para o relatório):
+  Chain FORWARD (policy DROP 0 packets, 0 bytes)
+  num   pkts bytes target     prot opt in     out     source               destination         
+  1        8   480 DROP       0    --  eth2   *      !10.77.1.0/24         0.0.0.0/0            /* S1 anti-spoofing LAN */
+  2        0     0 DROP       0    --  *      *       0.0.0.0/0            0.0.0.0/0            ctstate INVALID
+  3       68 14594 ACCEPT     0    --  *      *       0.0.0.0/0            0.0.0.0/0            ctstate RELATED,ESTABLISHED
+  4        4   208 ACCEPT     6    --  eth2   eth1    10.77.1.0/24         10.77.2.10           tcp dpt:80 ctstate NEW /* R1 LAN->WEB http */
+  5        4   208 ACCEPT     6    --  eth2   eth1    10.77.1.0/24         10.77.2.10           tcp dpt:443 ctstate NEW /* R2 LAN->WEB https */
+  6        2   168 ACCEPT     1    --  eth2   eth1    10.77.1.0/24         10.77.2.10           icmptype 8 limit: avg 10/sec burst 20 /* R3 LAN->WEB ping */
+  7       18  1016 LOG_DROP   6    --  eth2   eth0    10.77.1.0/24         10.77.3.20           tcp dpt:5432 /* R4 LAN->DB postgres (DROP) */
+  8       10   648 LOG_DROP   0    --  eth2   eth0    10.77.1.0/24         0.0.0.0/0            /* R5 LAN->DB demais (DROP) */
+  9       22  1064 LOG_DROP   0    --  eth2   eth1    10.77.1.0/24         0.0.0.0/0            /* R6 LAN->WEB demais (DROP) */
+  10       0     0 LOG_DROP   0    --  eth1   eth2    0.0.0.0/0            0.0.0.0/0            /* R7 DMZ->LAN (DROP) */
+  11       0     0 LOG_DROP   0    --  eth0   *       0.0.0.0/0            0.0.0.0/0            /* R8 DB->qualquer (DROP) */
+  12       0     0 LOG_DROP   0    --  eth1   eth0    0.0.0.0/0            0.0.0.0/0            /* R9 DMZ->DB via firewall (DROP) */
+  13       0     0 LOG_DROP   0    --  *      *       0.0.0.0/0            0.0.0.0/0            /* R10 negar o resto */
+
+Resumo: 21 passaram, 0 falharam
