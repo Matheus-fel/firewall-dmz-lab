@@ -1,0 +1,14 @@
+# ---------------------------------------------------------------
+# .gitattributes - normalização de fim de linha
+#
+# IMPORTANTE: scripts .sh que rodam dentro de containers Linux precisam
+# usar fim de linha LF. Se o Git no Windows converter para CRLF, o
+# container falha com "/bin/sh^M: bad interpreter". Forçamos LF aqui.
+# ---------------------------------------------------------------
+* text=auto
+*.sh   text eol=lf
+*.sql  text eol=lf
+*.conf text eol=lf
+*.yml  text eol=lf
+*.md   text eol=lf
+Dockerfile text eol=lf

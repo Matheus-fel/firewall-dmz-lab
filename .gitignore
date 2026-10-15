@@ -1,0 +1,20 @@
+# ---------------------------------------------------------------
+# .gitignore - arquivos que NÃO devem ir para o repositório
+# ---------------------------------------------------------------
+
+# Arquivo com credenciais reais do ambiente (use o .env.example como modelo)
+.env
+
+# Dados persistidos do PostgreSQL, caso o aluno monte um volume local
+db/data/
+
+# Logs e temporários
+*.log
+*.tmp
+*.swp
+
+# Arquivos de sistema/IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
