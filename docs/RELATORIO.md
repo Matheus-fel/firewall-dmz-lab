@@ -127,7 +127,6 @@ flowchart LR
     FW -- "ACCEPT 80/443" --> WEB
     CLI -. "TCP 5432 ✘ DROP" .-> FW
     WEB == "5432 (mesmo segmento, pg_hba)" ==> DB
-    WEB --- DBN
 ```
 
 #### Endereçamento
@@ -164,3 +163,61 @@ flowchart LR
 | P5 Sem *deny-by-default* | Política `DROP` em todas as cadeias. |
 | P6 Gargalo / ponto único | Tráfego de cada zona fica em seu próprio segmento; o firewall permite limitar e priorizar fluxos. |
 | P7 Web sem isolamento | Web na DMZ, sem permissão de iniciar conexões para a LAN. |
+
+---
+
+## 3. Matriz de Regras de Segurança (Firewall)
+
+As regras estão em [`firewall/rules.sh`](../firewall/rules.sh) e são carregadas
+automaticamente pelo `entrypoint.sh` sempre que o container do firewall sobe.
+O rótulo da primeira coluna aparece no `--comment` de cada regra do iptables,
+o que permite localizá-la com `iptables -L -n -v`.
+
+### 3.1 Política padrão (base do modelo *deny by default*)
+
+| Cadeia | Política | Significado |
+|---|---|---|
+| `INPUT` (tráfego **para** o firewall) | **DROP** | O firewall não oferece serviço algum, exceto o ping de diagnóstico (I1). |
+| `FORWARD` (tráfego **através** do firewall) | **DROP** | Nada passa entre as zonas sem regra explícita. |
+| `OUTPUT` (tráfego **gerado** pelo firewall) | **DROP** | Apenas respostas a conexões já aceitas. |
+| IPv6 (as três cadeias) | **DROP** | O laboratório não usa IPv6; nada é liberado. |
+
+### 3.2 Regras de passagem entre zonas (cadeia `FORWARD`)
+
+| Rótulo | Origem | Destino | Porta / Protocolo | Ação | Justificativa do negócio |
+|---|---|---|---|---|---|
+| S1 | LAN, com IP de origem **fora** de `10.77.1.0/24` | Qualquer | Qualquer | **DROP** | Anti-spoofing: impede que alguém na LAN forje o IP de outra zona. |
+| — | Qualquer | Qualquer | Pacotes `INVALID` (conntrack) | **DROP** | Pacotes malformados ou fora de sequência não pertencem a nenhuma conexão legítima. |
+| — | Qualquer | Qualquer | Pacotes `ESTABLISHED, RELATED` | **ACCEPT** | Permite as **respostas** das conexões já autorizadas (firewall *stateful*). |
+| R1 | Rede Cliente (`10.77.1.0/24`) | DMZ — Web (`10.77.2.10`) | TCP **80** (`NEW`) | **ACCEPT** | Funcionários acessam a loja/painel por HTTP. |
+| R2 | Rede Cliente | DMZ — Web | TCP **443** (`NEW`) | **ACCEPT** | Acesso seguro (HTTPS) ao sistema. |
+| R3 | Rede Cliente | DMZ — Web | ICMP *echo-request*, máx. 10/s | **ACCEPT** | Diagnóstico de disponibilidade do site pela equipe de TI, com limite de taxa contra inundação. |
+| R4 | Rede Cliente | DMZ — Banco (`10.77.3.20`) | TCP **5432** | **DROP** (+log) | Estação de trabalho **não deve acessar o banco direto**: protege os dados pessoais (LGPD). |
+| R5 | Rede Cliente | Segmento do banco (`db_net`), qualquer outra coisa | Qualquer | **DROP** (+log) | Fecha atalhos, como alcançar o web pelo seu IP do segmento do banco (`10.77.3.10`). |
+| R6 | Rede Cliente | DMZ, demais portas/protocolos | Qualquer (SSH 22, 3306, 8080…) | **DROP** (+log) | Reduz a superfície de ataque: só 80/443 são serviços do negócio. |
+| R7 | DMZ | Rede Cliente | Qualquer (novas conexões) | **DROP** (+log) | Servidor web comprometido não consegue iniciar ataques contra as estações. |
+| R8 | Segmento do banco | Qualquer destino | Qualquer (novas conexões) | **DROP** (+log) | O banco nunca inicia conexões: impede exfiltração de dados e *reverse shell*. |
+| R9 | DMZ | Segmento do banco, **via firewall** | Qualquer | **DROP** (+log) | O web conversa com o banco diretamente em `db_net` (mesmo segmento), então nada precisa cruzar o firewall nesse caminho. |
+| R10 | Qualquer | Qualquer | Qualquer | **DROP** (+log) | Regra final explícita; equivale à política, mas gera registro e contador. |
+
+### 3.3 Regras do próprio firewall (cadeia `INPUT`) e NAT
+
+| Rótulo | Origem | Destino | Porta / Protocolo | Ação | Justificativa do negócio |
+|---|---|---|---|---|---|
+| S1 | LAN com IP forjado | Firewall | Qualquer | **DROP** | Mesmo anti-spoofing aplicado ao tráfego destinado ao gateway. |
+| I1 | Rede Cliente | Firewall (gateway) | ICMP *echo-request*, máx. 10/s | **ACCEPT** | Permite testar se o gateway está no ar. |
+| I2 | Qualquer | Firewall | Qualquer outra coisa | **DROP** (+log) | O firewall não deve ter nenhum serviço exposto (SSH, HTTP…): reduz a superfície de ataque. |
+| N1 | Rede Cliente | Saída pela interface da DMZ | Qualquer | **MASQUERADE** (NAT) | O web responde direto ao firewall, sem rota de retorno e sem `NET_ADMIN` nos servidores (menor privilégio). A filtragem ocorre **antes** do NAT, então as regras enxergam o IP real do cliente. |
+
+### 3.4 Matriz resumida entre as zonas
+
+| Origem ↓ / Destino → | Rede Cliente (LAN) | DMZ — Web | Segmento do banco |
+|---|---|---|---|
+| **Rede Cliente (LAN)** | — | ✅ TCP 80, 443 e ping | ❌ bloqueado |
+| **DMZ — Web** | ❌ não inicia conexões | — | ✅ TCP 5432 direto em `db_net` (restrito pelo `pg_hba.conf`) |
+| **Segmento do banco** | ❌ não inicia conexões | ❌ não inicia conexões | — |
+
+> **Defesa em profundidade:** o acesso do web ao banco é limitado por duas
+> camadas independentes: (1) o banco está em um segmento isolado, sem caminho
+> a partir da LAN; (2) o `pg_hba.conf` só aceita o usuário `loja_app`, vindo do
+> IP `10.77.3.10`, com senha criptografada (`scram-sha-256`).
