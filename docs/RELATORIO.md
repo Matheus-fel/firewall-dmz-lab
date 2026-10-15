@@ -149,7 +149,7 @@ flowchart LR
 | **Web é o único elo com o banco**, validado também no `pg_hba.conf` (defesa em profundidade) | Mesmo que alguém alcançasse a porta 5432, o PostgreSQL só aceitaria o usuário da aplicação vindo do IP do web. |
 | **Anti-spoofing na interface da LAN** | Descarta pacotes que chegam pela LAN com IP de origem de outra rede, evitando que um cliente forje o endereço de uma zona confiável. |
 | **NAT (`MASQUERADE`) apenas LAN → DMZ** | Os servidores respondem ao firewall sem precisar de rotas de retorno nem de `NET_ADMIN`. Assim, os servidores (web e banco) rodam sem `NET_ADMIN`; apenas o firewall, e o cliente para criar suas rotas, recebem essa capability (**menor privilégio**). |
-| **Rede `internal: true`** nas três redes | O laboratório fica fechado: nenhum container alcança a internet ou o host por engano, e o único caminho entre zonas é o firewall. |
+| **NAT de saída desligado** nas três redes (`enable_ip_masquerade: "false"`) | O laboratório fica isolado da internet: nenhum container completa conexões para fora, e o único caminho entre zonas é o firewall. |
 | **Regras carregadas automaticamente no `entrypoint.sh`** | O ambiente é reproduzível: `docker compose up -d` já sobe o firewall configurado, sem passos manuais. |
 
 #### Como o problema mapeado se resolve

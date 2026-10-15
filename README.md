@@ -40,9 +40,7 @@ flowchart LR
 | `web` | Servidor Nginx (HTTP e HTTPS) | `dmz_net`, `db_net` | 10.77.2.10 · 10.77.3.10 |
 | `db` | PostgreSQL 16 | `db_net` | 10.77.3.20 |
 
-A rede do cliente **não** alcança os serviços sem passar pelo firewall, e todas
-as redes são `internal: true` (o laboratório é fechado: nada sai para a
-internet nem para o host).
+A rede do cliente **não** alcança os serviços sem passar pelo firewall, e as redes têm o NAT de saída desligado (enable_ip_masquerade: "false"), então o laboratório não tem saída para a internet.
 
 ---
 
