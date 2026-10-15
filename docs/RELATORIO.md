@@ -221,3 +221,126 @@ o que permite localizá-la com `iptables -L -n -v`.
 > camadas independentes: (1) o banco está em um segmento isolado, sem caminho
 > a partir da LAN; (2) o `pg_hba.conf` só aceita o usuário `loja_app`, vindo do
 > IP `10.77.3.10`, com senha criptografada (`scram-sha-256`).
+
+---
+
+## 4. Metodologia de Testes e Validação
+
+Esta seção é um passo a passo para o professor/avaliador reproduzir o ambiente
+e confirmar o comportamento do firewall. Todos os comandos são executados na
+raiz do repositório.
+
+### 4.1 Pré-requisitos
+
+- Docker Engine e Docker Compose v2 (`docker compose version`).
+- Acesso à internet **apenas durante o build** (para baixar as imagens e pacotes Alpine).
+- Um host Linux, ou Windows/macOS com Docker Desktop (backend WSL2/Linux).
+- Portas: o laboratório **não publica nenhuma porta no host**.
+
+### 4.2 Subir o ambiente
+
+```bash
+git clone <URL-DO-REPOSITORIO>
+cd firewall-dmz-lab
+docker compose up -d --build
+docker compose ps        # firewall, db e web devem aparecer como "healthy"
+```
+
+O firewall carrega as regras sozinho (via `entrypoint.sh`). Para ver o log da
+carga das regras, que registra cada comando `iptables` executado:
+
+```bash
+docker compose logs firewall
+```
+
+### 4.3 Verificação do estado do firewall
+
+```bash
+# Políticas padrão: as três devem ser DROP
+docker compose exec firewall iptables -S | grep '^-P'
+
+# Roteamento ativo (deve imprimir 1)
+docker compose exec firewall cat /proc/sys/net/ipv4/ip_forward
+
+# Regras da cadeia FORWARD com contadores de pacotes
+docker compose exec firewall iptables -L FORWARD -n -v --line-numbers
+
+# Regra de NAT
+docker compose exec firewall iptables -t nat -L POSTROUTING -n -v
+```
+
+### 4.4 Testes manuais
+
+Todos partem do container `client`, que está na rede interna (LAN).
+
+#### Testes positivos (devem funcionar)
+
+| # | Comando | Resultado esperado | Regra |
+|---|---|---|---|
+| P1 | `docker compose exec client curl -s -o /dev/null -w '%{http_code}\n' http://dmz-web` | `200` | R1 |
+| P2 | `docker compose exec client curl -sk -o /dev/null -w '%{http_code}\n' https://dmz-web` | `200` (`-k` aceita o certificado autoassinado) | R2 |
+| P3 | `docker compose exec client ping -c 2 dmz-web` | 0% de perda | R3 |
+| P4 | `docker compose exec client ping -c 2 10.77.1.254` | 0% de perda (gateway) | I1 |
+| P5 | `docker compose exec web nc -zv db 5432` | `open` (web alcança o banco) | mesmo segmento |
+| P6 | `docker compose exec -e PGPASSWORD=App-Lab-2026 web psql -h db -U loja_app -d lojadb -c 'SELECT * FROM produtos'` | Lista os 3 produtos | `pg_hba.conf` |
+
+#### Testes negativos (devem ser bloqueados)
+
+| # | Comando | Resultado esperado | Regra |
+|---|---|---|---|
+| N1 | `docker compose exec client nc -zv -w 3 dmz-db 5432` | Falha por **tempo esgotado** (não "connection refused": o pacote é descartado em silêncio) | R4 |
+| N2 | `docker compose exec client psql "host=dmz-db user=loja_app dbname=lojadb connect_timeout=4" -c 'SELECT 1'` | `timeout expired` | R4 |
+| N3 | `docker compose exec client nmap -Pn -p 5432 dmz-db` | Porta `5432/tcp filtered` | R4 |
+| N4 | `docker compose exec client nmap -Pn -p 22,80,443,3306,5432,8080 dmz-web` | Somente **80 e 443 `open`**; as demais `filtered` | R1, R2, R6 |
+| N5 | `docker compose exec client nc -zv -w 3 dmz-web 8080` | Tempo esgotado | R6 |
+| N6 | `docker compose exec client nc -zv -w 3 10.77.1.254 22` | Tempo esgotado (o firewall não oferece SSH) | I2 |
+| N7 | `docker compose exec client ping -c 1 -W 2 dmz-db` | 100% de perda | R5 |
+| N8 | `docker compose exec client curl --max-time 4 http://10.77.3.10` | Tempo esgotado (atalho pelo IP do web no segmento do banco) | R5 |
+
+> **Por que `-Pn` no nmap?** Por padrão o nmap primeiro envia pings para saber
+> se o alvo está "vivo". Como o firewall descarta o ICMP para o banco, o nmap
+> concluiria "host down" sem testar a porta. O `-Pn` pula essa etapa e testa a
+> porta diretamente.
+
+> **Por que "filtered" e não "closed"?** Uma porta *closed* responde com `RST`
+> (o host existe, mas nada escuta). Uma porta *filtered* **não responde** porque
+> o firewall descartou o pacote com `DROP`. É a assinatura de um firewall em ação.
+
+### 4.5 Testes automatizados
+
+O script executa todos os testes acima (e o de anti-spoofing) e imprime
+`PASS`/`FAIL`, terminando com código de saída diferente de zero se algo falhar:
+
+```bash
+./tests/run-tests.sh
+```
+
+Além dos testes de conectividade, ele confere o **contador de pacotes** das
+regras R1 (ACCEPT) e R4 (DROP). Isso prova que o bloqueio foi feito **pela regra
+do firewall** e não por falta de rota na rede.
+
+### 4.6 Evidências da execução
+
+> **Preencher após executar** (o aluno cola aqui a saída real obtida no seu
+> ambiente): o resultado de `./tests/run-tests.sh` e a saída de
+> `docker compose exec firewall iptables -L FORWARD -n -v --line-numbers`.
+
+```text
+(colar a saída do ./tests/run-tests.sh)
+```
+
+### 4.7 Encerrar o ambiente
+
+```bash
+docker compose down        # remove containers e redes, mantém os dados do banco
+docker compose down -v     # remove também o volume db_data (recomeça do zero)
+```
+
+### 4.8 Problemas comuns
+
+| Sintoma | Causa provável | Solução |
+|---|---|---|
+| `Pool overlaps with other one on this address space` | Outra rede Docker/VPN já usa `10.77.x.0/24` | Trocar as sub-redes no `docker-compose.yml` e as variáveis do firewall/cliente. |
+| `bad interpreter: /bin/sh^M` | Git no Windows converteu fim de linha para CRLF | Recriar o clone (o `.gitattributes` já força LF) e rodar `docker compose up -d --build`. |
+| Firewall reinicia sozinho; log mostra `nenhum backend do iptables funciona` | Host sem suporte ao Netfilter no Docker | Usar um host Linux, ou Docker Desktop com WSL2/VM Linux. |
+| `docker compose ps` mostra `db` como `unhealthy` na 1ª vez | Inicialização do PostgreSQL ainda em andamento | Aguardar alguns segundos e conferir de novo. |
