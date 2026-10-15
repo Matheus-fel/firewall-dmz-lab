@@ -109,18 +109,18 @@ redes `bridge` isoladas.
 
 ```mermaid
 flowchart LR
-    subgraph LAN["lan_net · 172.20.0.0/24 (rede cliente)"]
-        CLI["client<br/>172.20.0.10"]
+    subgraph LAN["lan_net · 10.77.1.0/24 (rede cliente)"]
+        CLI["client<br/>10.77.1.10"]
     end
 
     FW{{"FIREWALL<br/>iptables · DROP por padrão<br/>.254 em cada rede"}}
 
-    subgraph DMZ["dmz_net · 172.21.0.0/24 (DMZ)"]
-        WEB["dmz-web (Nginx)<br/>172.21.0.10"]
+    subgraph DMZ["dmz_net · 10.77.2.0/24 (DMZ)"]
+        WEB["dmz-web (Nginx)<br/>10.77.2.10"]
     end
 
-    subgraph DBN["db_net · 172.22.0.0/24 (segmento de dados)"]
-        DB[("dmz-db (PostgreSQL)<br/>172.22.0.20")]
+    subgraph DBN["db_net · 10.77.3.0/24 (segmento de dados)"]
+        DB[("dmz-db (PostgreSQL)<br/>10.77.3.20")]
     end
 
     CLI -- "TCP 80/443 ✔" --> FW
@@ -134,9 +134,9 @@ flowchart LR
 
 | Rede (Compose) | Sub-rede | Membros |
 |---|---|---|
-| `lan_net` | 172.20.0.0/24 | `client` (.10) · `firewall` (.254) |
-| `dmz_net` | 172.21.0.0/24 | `web` (.10) · `firewall` (.254) |
-| `db_net`  | 172.22.0.0/24 | `web` (.10) · `db` (.20) · `firewall` (.254) |
+| `lan_net` | 10.77.1.0/24 | `client` (.10) · `firewall` (.254) |
+| `dmz_net` | 10.77.2.0/24 | `web` (.10) · `firewall` (.254) |
+| `db_net`  | 10.77.3.0/24 | `web` (.10) · `db` (.20) · `firewall` (.254) |
 
 #### Justificativas das decisões de arquitetura
 

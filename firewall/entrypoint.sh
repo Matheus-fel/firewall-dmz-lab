@@ -20,16 +20,16 @@ set -eu
 # Parâmetros do ambiente (vêm do docker-compose.yml; valores padrão abaixo
 # servem apenas como segurança caso alguma variável não seja informada).
 # ---------------------------------------------------------------------
-export FW_LAN_IP="${FW_LAN_IP:-172.20.0.254}"   # IP do firewall na rede cliente
-export FW_DMZ_IP="${FW_DMZ_IP:-172.21.0.254}"   # IP do firewall na DMZ
-export FW_DB_IP="${FW_DB_IP:-172.22.0.254}"     # IP do firewall no segmento de dados
+export FW_LAN_IP="${FW_LAN_IP:-10.77.1.254}"   # IP do firewall na rede cliente
+export FW_DMZ_IP="${FW_DMZ_IP:-10.77.2.254}"   # IP do firewall na DMZ
+export FW_DB_IP="${FW_DB_IP:-10.77.3.254}"     # IP do firewall no segmento de dados
 
-export LAN_SUBNET="${LAN_SUBNET:-172.20.0.0/24}"
-export DMZ_SUBNET="${DMZ_SUBNET:-172.21.0.0/24}"
-export DB_SUBNET="${DB_SUBNET:-172.22.0.0/24}"
+export LAN_SUBNET="${LAN_SUBNET:-10.77.1.0/24}"
+export DMZ_SUBNET="${DMZ_SUBNET:-10.77.2.0/24}"
+export DB_SUBNET="${DB_SUBNET:-10.77.3.0/24}"
 
-export WEB_IP="${WEB_IP:-172.21.0.10}"          # servidor web (na DMZ)
-export DB_IP="${DB_IP:-172.22.0.20}"            # servidor de banco de dados
+export WEB_IP="${WEB_IP:-10.77.2.10}"          # servidor web (na DMZ)
+export DB_IP="${DB_IP:-10.77.3.20}"            # servidor de banco de dados
 
 READY_FILE="/tmp/firewall-ready"                # usado pelo healthcheck do compose
 rm -f "${READY_FILE}"                           # em um restart, começa "não pronto"
@@ -37,7 +37,7 @@ rm -f "${READY_FILE}"                           # em um restart, começa "não p
 # ---------------------------------------------------------------------
 # Função: devolve o nome da interface que possui o IP informado.
 # "ip -o -4 addr show" imprime uma linha por endereço, por exemplo:
-#   7: eth1    inet 172.21.0.254/24 brd ... scope global eth1
+#   7: eth1    inet 10.77.2.254/24 brd ... scope global eth1
 # O campo 2 é o nome da interface; o campo 4 é "IP/prefixo".
 # ---------------------------------------------------------------------
 iface_by_ip() {

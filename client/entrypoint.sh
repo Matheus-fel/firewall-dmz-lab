@@ -2,22 +2,22 @@
 # =====================================================================
 # client/entrypoint.sh
 #
-# O cliente fica na rede "lan_net". As redes da DMZ (172.21.0.0/24) e do
-# segmento de dados (172.22.0.0/24) NÃO são diretamente alcançáveis: o
+# O cliente fica na rede "lan_net". As redes da DMZ (10.77.2.0/24) e do
+# segmento de dados (10.77.3.0/24) NÃO são diretamente alcançáveis: o
 # único caminho até elas é passando pelo FIREWALL.
 #
 # Num escritório real, o DHCP entregaria o firewall como "gateway padrão".
 # Aqui, como o Docker não faz isso, criamos as rotas estáticas manualmente.
 #
 # Variáveis (definidas no docker-compose.yml):
-#   GATEWAY_IP     -> IP do firewall na rede cliente (ex.: 172.20.0.254)
+#   GATEWAY_IP     -> IP do firewall na rede cliente (ex.: 10.77.1.254)
 #   ROUTED_SUBNETS -> sub-redes que devem ser alcançadas via firewall
 # =====================================================================
 set -eu
 
 # Valores padrão caso o compose não defina as variáveis.
-GATEWAY_IP="${GATEWAY_IP:-172.20.0.254}"
-ROUTED_SUBNETS="${ROUTED_SUBNETS:-172.21.0.0/24 172.22.0.0/24}"
+GATEWAY_IP="${GATEWAY_IP:-10.77.1.254}"
+ROUTED_SUBNETS="${ROUTED_SUBNETS:-10.77.2.0/24 10.77.3.0/24}"
 
 echo "[client] Configurando rotas via firewall (${GATEWAY_IP})..."
 
