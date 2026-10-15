@@ -51,7 +51,7 @@ internet nem para o host).
 **Pré-requisitos:** Docker Engine e Docker Compose v2.
 
 ```bash
-git clone <URL-DO-REPOSITORIO>
+git clone https://github.com/Matheus-fel/firewall-dmz-lab
 cd firewall-dmz-lab
 
 docker compose up -d --build     # sobe tudo; o firewall carrega as regras sozinho

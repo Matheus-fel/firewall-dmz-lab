@@ -240,7 +240,7 @@ raiz do repositório.
 ### 4.2 Subir o ambiente
 
 ```bash
-git clone <URL-DO-REPOSITORIO>
+git clone https://github.com/Matheus-fel/firewall-dmz-lab
 cd firewall-dmz-lab
 docker compose up -d --build
 docker compose ps        # firewall, db e web devem aparecer como "healthy"
