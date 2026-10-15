@@ -164,26 +164,36 @@ services:
 # =====================================================================
 # Redes personalizadas (drivers "bridge" nativos do Docker)
 #
-# "internal: true" deixa o laboratório FECHADO: os containers não têm saída
-# para a internet nem para o host. O único caminho entre as zonas é o
-# firewall, que é exatamente o que queremos provar.
+# NÃO usamos "internal: true". Nas versões atuais do Docker, esse modo cria
+# no host regras que descartam todo pacote que sai da bridge com destino a
+# outra sub-rede, inclusive o tráfego que o firewall precisa rotear. Isso
+# foi constatado nos testes: os pacotes do cliente morriam no host, antes
+# de chegar às regras do iptables do container firewall.
+#
+# Para manter o laboratório isolado da internet, desligamos o NAT de saída
+# ("enable_ip_masquerade": "false"): sem mascaramento, nenhum container
+# consegue completar conexões para fora. O único caminho entre as zonas
+# continua sendo o firewall, que é exatamente o que queremos provar.
 # =====================================================================
 networks:
   lan_net:
     driver: bridge
-    internal: true
+    driver_opts:
+      com.docker.network.bridge.enable_ip_masquerade: "false"
     ipam:
       config:
         - subnet: 10.77.1.0/24
   dmz_net:
     driver: bridge
-    internal: true
+    driver_opts:
+      com.docker.network.bridge.enable_ip_masquerade: "false"
     ipam:
       config:
         - subnet: 10.77.2.0/24
   db_net:
     driver: bridge
-    internal: true
+    driver_opts:
+      com.docker.network.bridge.enable_ip_masquerade: "false"
     ipam:
       config:
         - subnet: 10.77.3.0/24
