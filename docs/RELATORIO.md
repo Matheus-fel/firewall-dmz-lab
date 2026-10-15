@@ -148,7 +148,7 @@ flowchart LR
 | **Liberação mínima: apenas TCP 80/443 da LAN para o web** (resolve P3) | É exatamente o que o negócio precisa (usar o site). Cada regra tem justificativa na [matriz da seção 3](#3-matriz-de-regras-de-segurança-firewall). |
 | **Web é o único elo com o banco**, validado também no `pg_hba.conf` (defesa em profundidade) | Mesmo que alguém alcançasse a porta 5432, o PostgreSQL só aceitaria o usuário da aplicação vindo do IP do web. |
 | **Anti-spoofing na interface da LAN** | Descarta pacotes que chegam pela LAN com IP de origem de outra rede, evitando que um cliente forje o endereço de uma zona confiável. |
-| **NAT (`MASQUERADE`) apenas LAN → DMZ** | Os servidores respondem ao firewall sem precisar de rotas de retorno nem de `NET_ADMIN`. Assim, só o firewall tem privilégio administrativo sobre a rede (**menor privilégio**). |
+| **NAT (`MASQUERADE`) apenas LAN → DMZ** | Os servidores respondem ao firewall sem precisar de rotas de retorno nem de `NET_ADMIN`. Assim, os servidores (web e banco) rodam sem `NET_ADMIN`; apenas o firewall, e o cliente para criar suas rotas, recebem essa capability (**menor privilégio**). |
 | **Rede `internal: true`** nas três redes | O laboratório fica fechado: nenhum container alcança a internet ou o host por engano, e o único caminho entre zonas é o firewall. |
 | **Regras carregadas automaticamente no `entrypoint.sh`** | O ambiente é reproduzível: `docker compose up -d` já sobe o firewall configurado, sem passos manuais. |
 
