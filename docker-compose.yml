@@ -1,0 +1,192 @@
+# =====================================================================
+# docker-compose.yml
+# Laboratório de firewall Linux (Netfilter/iptables) com DMZ - CerradoShop
+#
+# Topologia (3 redes bridge isoladas):
+#
+#   lan_net 10.77.1.0/24        dmz_net 10.77.2.0/24       db_net 10.77.3.0/24
+#   +--------+                   +--------+               +--------+
+#   | client |---+            +--|  web   |---------------|   db   |
+#   +--------+   |            |  +--------+  (dual-homed) +--------+
+#                v            v
+#              +-----------------+
+#              |    FIREWALL     |  .254 em cada rede, DROP por padrão
+#              +-----------------+
+#
+# Como subir:   docker compose up -d --build
+# Como testar:  ./tests/run-tests.sh
+# Como derrubar: docker compose down -v
+# =====================================================================
+
+name: cerradoshop-fw-lab
+
+services:
+
+  # -------------------------------------------------------------------
+  # FIREWALL: único elo entre a rede cliente e os servidores.
+  # -------------------------------------------------------------------
+  firewall:
+    build: ./firewall
+    hostname: firewall
+    # "init: true" coloca um mini-init (tini) como PID 1, para o container
+    # encerrar rápido no "docker compose down" em vez de esperar 10 s.
+    init: true
+    restart: unless-stopped
+    # NET_ADMIN é a única capability extra: necessária para o iptables
+    # alterar as regras do kernel dentro do container.
+    cap_add:
+      - NET_ADMIN
+    # Habilita o roteamento de pacotes entre as redes (ip_forward).
+    # Equivale a "sysctl net.ipv4.ip_forward=1" no container.
+    sysctls:
+      net.ipv4.ip_forward: "1"
+    # Parâmetros lidos por firewall/entrypoint.sh e firewall/rules.sh
+    environment:
+      FW_LAN_IP: 10.77.1.254
+      FW_DMZ_IP: 10.77.2.254
+      FW_DB_IP: 10.77.3.254
+      LAN_SUBNET: 10.77.1.0/24
+      DMZ_SUBNET: 10.77.2.0/24
+      DB_SUBNET: 10.77.3.0/24
+      WEB_IP: 10.77.2.10
+      DB_IP: 10.77.3.20
+    networks:
+      lan_net:
+        ipv4_address: 10.77.1.254
+      dmz_net:
+        ipv4_address: 10.77.2.254
+      db_net:
+        ipv4_address: 10.77.3.254
+    # Só fica "healthy" depois que o entrypoint carregou as regras.
+    # Os demais serviços esperam por isso (depends_on abaixo).
+    healthcheck:
+      test: ["CMD", "test", "-f", "/tmp/firewall-ready"]
+      interval: 3s
+      timeout: 2s
+      retries: 20
+      start_period: 3s
+
+  # -------------------------------------------------------------------
+  # CLIENTE: estação de trabalho da rede interna (LAN).
+  # -------------------------------------------------------------------
+  client:
+    build: ./client
+    hostname: client
+    init: true
+    # NET_ADMIN aqui serve APENAS para criar as rotas estáticas até a DMZ.
+    # A segurança NÃO depende disso: mesmo com NET_ADMIN, o cliente não
+    # consegue atravessar o firewall (ele é quem aplica as regras).
+    cap_add:
+      - NET_ADMIN
+    environment:
+      GATEWAY_IP: 10.77.1.254
+      ROUTED_SUBNETS: "10.77.2.0/24 10.77.3.0/24"
+    # Como o cliente não está nas mesmas redes dos servidores, o DNS interno
+    # do Docker não resolve os nomes deles. Fixamos os nomes no /etc/hosts
+    # para os testes poderem usar "curl http://dmz-web".
+    extra_hosts:
+      - "dmz-web:10.77.2.10"
+      - "dmz-db:10.77.3.20"
+    networks:
+      lan_net:
+        ipv4_address: 10.77.1.10
+    depends_on:
+      firewall:
+        condition: service_healthy
+
+  # -------------------------------------------------------------------
+  # WEB (DMZ): servidor Nginx exposto para a rede cliente.
+  # É "dual-homed": fica na DMZ (para atender o público) e no segmento do
+  # banco (para consultar os dados). Não encaminha pacotes entre as duas.
+  # -------------------------------------------------------------------
+  web:
+    build: ./web
+    hostname: web
+    restart: unless-stopped
+    # Garante que o web NÃO atue como roteador entre dmz_net e db_net.
+    sysctls:
+      net.ipv4.ip_forward: "0"
+    volumes:
+      # Configuração do Nginx e site, somente leitura (:ro) dentro do container.
+      - ./web/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./web/html:/usr/share/nginx/html:ro
+    networks:
+      dmz_net:
+        ipv4_address: 10.77.2.10
+        aliases:
+          - dmz-web
+      db_net:
+        ipv4_address: 10.77.3.10
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    depends_on:
+      db:
+        condition: service_healthy
+      firewall:
+        condition: service_healthy
+
+  # -------------------------------------------------------------------
+  # DB: PostgreSQL isolado no segmento de dados. Nenhuma porta publicada.
+  # -------------------------------------------------------------------
+  db:
+    image: postgres:16-alpine
+    hostname: db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-lojadb}
+      POSTGRES_USER: ${POSTGRES_USER:-dbadmin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-Adm1n-Lab-2026}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:-App-Lab-2026}
+    # Usa o nosso pg_hba.conf, que só aceita o servidor web pela rede.
+    command: ["postgres", "-c", "hba_file=/etc/postgresql/pg_hba.conf"]
+    volumes:
+      # Volume nomeado: os dados sobrevivem a "docker compose down" (sem -v).
+      - db_data:/var/lib/postgresql/data
+      # Scripts de criação do esquema e do usuário (rodam só na 1ª inicialização).
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+      # Regras de autenticação do PostgreSQL.
+      - ./db/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+    networks:
+      db_net:
+        ipv4_address: 10.77.3.20
+        aliases:
+          - dmz-db
+    healthcheck:
+      # pg_isready usa o socket local (liberado como "trust" no pg_hba.conf).
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-dbadmin} -d ${POSTGRES_DB:-lojadb}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+# =====================================================================
+# Redes personalizadas (drivers "bridge" nativos do Docker)
+#
+# "internal: true" deixa o laboratório FECHADO: os containers não têm saída
+# para a internet nem para o host. O único caminho entre as zonas é o
+# firewall, que é exatamente o que queremos provar.
+# =====================================================================
+networks:
+  lan_net:
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: 10.77.1.0/24
+  dmz_net:
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: 10.77.2.0/24
+  db_net:
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: 10.77.3.0/24
+
+volumes:
+  db_data:
